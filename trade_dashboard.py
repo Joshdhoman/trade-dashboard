@@ -77,23 +77,44 @@ c4.metric("Cumulative P&L", f"{cum_pnl:,.2f}" if pd.notna(cum_pnl) else "–")
 st.caption("Days Opened = Today minus earliest TradeDay (or EnteredAt). KPIs update on refresh.")
 
 # ---------- Filters ----------
+# ---------- Filters ----------
 with st.sidebar:
     st.header("Filters")
-    # Date range
-    min_date = df["TradeDay"].min().date() if "TradeDay" in df.columns else df["EnteredAt"].min().date()
-    max_date = df["TradeDay"].max().date() if "TradeDay" in df.columns else df["EnteredAt"].max().date()
-    date_range = st.date_input("Date range", (min_date, max_date), min_value=min_date, max_value=max_date)
+
+    # pick the date column we use for filtering
+    date_col = "TradeDay" if "TradeDay" in df.columns else "EnteredAt"
+
+    # compute min/max from that column
+    _dates = pd.to_datetime(df[date_col], errors="coerce")
+    # make them tz-naive for consistent comparisons
+    _dates = _dates.dt.tz_localize(None)
+
+    min_date = _dates.min().date()
+    max_date = _dates.max().date()
+
+    date_range = st.date_input(
+        "Date range",
+        (min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
 
     # Contract filter
     contracts = sorted(df["ContractName"].dropna().unique().tolist()) if "ContractName" in df.columns else []
     chosen = st.multiselect("Contracts", options=contracts, default=contracts[:5] if contracts else [])
 
-# Apply filters
+# ---------- Apply filters ----------
 mask = pd.Series(True, index=df.index)
+
+# make a tz-naive datetime Series to filter against
+dates_series = pd.to_datetime(df[date_col], errors="coerce").dt.tz_localize(None)
+
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-    start, end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    date_col = "TradeDay" if "TradeDay" in df.columns else "EnteredAt"
-    mask &= df[date_col].between(start, end)
+    start = pd.to_datetime(date_range[0])
+    # include the entire end day
+    end = pd.to_datetime(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    mask &= dates_series.between(start, end)
+
 if "ContractName" in df.columns and chosen:
     mask &= df["ContractName"].isin(chosen)
 
